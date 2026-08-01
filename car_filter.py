@@ -3,9 +3,11 @@ Script for consulting the Autobell Global (Hyundai Glovis) API's
 """
 #Note: Some outputs are established to be in Spanish since the main user uses this language.
 
-
+from telegram_bot import notify_new_cars
 import requests
 import time
+import json
+import os
 
 #Data of interest:
 MAX_PRICE = 2500       # Price in dolars
@@ -14,6 +16,7 @@ TRANSMISSION = "C004"       # C004 = Automatic transmission
 MIN_YEAR = 2014            # models starting from this year
 DESTINATION_COUNTRY = "CR"          # Looking for vehicles that can be exported to CR
 PAGE_SIZE = 60         
+HISTORY_FILE = "seen_cars.json"   # stores previously notified carKeys between runs
 
 URL_BASE = "https://www.autobellglobal.com/api/glovis/search/carFilterMobileList"
 URL_COUNT = "https://www.autobellglobal.com/api/glovis/search/carFilterCount"
@@ -187,17 +190,56 @@ def obtain_all_cars() -> list:
 
     return all_cars
 
+def load_history() -> set:
+    """
+    Loads the set of previously notified carKeys from the history file.
+    If the file doesn't exist yet (first run), returns an empty set.
+    """
+    if not os.path.exists(HISTORY_FILE):
+        return set()
+
+    with open(HISTORY_FILE, "r", encoding="utf-8") as file:
+        content = json.load(file)
+        return set(content.get("notified_car_keys", []))
+
+
+def save_history(notified_keys: set) -> None:
+    """Saves the updated set of notified carKeys to the history file."""
+    content = {"notified_car_keys": sorted(notified_keys)}
+
+    with open(HISTORY_FILE, "w", encoding="utf-8") as file:
+        json.dump(content, file, indent=2, ensure_ascii=False)
+
+
+def split_new_and_seen(cars: list, history: set) -> tuple:
+    """
+    Splits the car list into two: cars already in history (previously
+    notified) and new cars (to be notified now).
+    """
+    new_cars = [car for car in cars if car["carKey"] not in history]
+    seen_cars = [car for car in cars if car["carKey"] in history]
+
+    return new_cars, seen_cars
 
 if __name__ == "__main__":
     print(f"Buscando autos de gasolina con precio <= ${MAX_PRICE} USD...\n")
 
     cars = obtain_all_cars()
 
-    print(f"\nTotal de autos encontrados: {len(cars)}\n")
+    print(f"\nTotal de autos encontrados que cumplen los filtros: {len(cars)}\n")
 
-    for car in cars:
-        print(
-            f"{car['brand']} {car['model']} {car['detail_model_name'] or ''} "
-            f"({car['year']}) - {car['mileage']} km - "
-            f"${car['price_usd']} - {car['link']}"
-        )
+    history = load_history()
+    new_cars, seen_cars = split_new_and_seen(cars, history)
+
+    print(f"Autos ya notificados anteriormente (se ignoran): {len(seen_cars)}")
+    print(f"Autos NUEVOS (pendientes de notificar): {len(new_cars)}\n")
+
+    notify_new_cars(new_cars)
+
+    # Update history with ALL cars matching current filters (new + seen),
+    # so the next run recognizes all of them as "already notified".
+    updated_keys = history | {car["carKey"] for car in cars}
+    save_history(updated_keys)
+
+    print(f"\nHistorial actualizado y guardado en '{HISTORY_FILE}' "
+          f"({len(updated_keys)} carKeys en total).")
