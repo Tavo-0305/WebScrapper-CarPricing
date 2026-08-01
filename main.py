@@ -1,20 +1,22 @@
 """
-Consulta la API interna de Autobell Global (Hyundai Glovis) y devuelve
-la lista de autos de gasolina con precio menor o igual al máximo definido.
+Script for consulting the Autobell Global (Hyundai Glovis) API's
 """
+#Note: Some outputs are established to be in Spanish since the main user uses this language.
+
+
 import requests
 import time
 
-#Filtros básicos:
-PRECIO_MAXIMO = 2000       # Dólares
-COMBUSTIBLE = "C004"       # C004 = Gasolina 
-TRANSMISION = "C004"       # C004 = Automatico 
-MIN_YEAR = 2014            # Año mínimo
-PAIS_ENVIO = "CR"          # El envío debe estar disponible hacia Costa Rica
-TAMANO_PAGINA = 60         
+#Data of interest:
+MAX_PRICE = 2500       # Price in dolars
+FUEL_TYPE = "C004"       # C004 = Gasoline 
+TRANSMISSION = "C004"       # C004 = Automatic transmission 
+MIN_YEAR = 2014            # models starting from this year
+DESTINATION_COUNTRY = "CR"          # Looking for vehicles that can be exported to CR
+PAGE_SIZE = 60         
 
 URL_BASE = "https://www.autobellglobal.com/api/glovis/search/carFilterMobileList"
-URL_CONTEO = "https://www.autobellglobal.com/api/glovis/search/carFilterCount"
+URL_COUNT = "https://www.autobellglobal.com/api/glovis/search/carFilterCount"
 
 HEADERS = {
     "User-Agent": (
@@ -24,18 +26,20 @@ HEADERS = {
 }
 
 
-def construir_parametros(pagina: int) -> dict:
-    """Arma el diccionario de parámetros para la petición a la API."""
+def build_params(page: int) -> dict:
+    """
+    Builds a dictionary with parameters for the petition to the API
+    """
     return {
-        "makerModelGrade": "",       # vacío, busco todas las marcas/modelos
-        "fuels": COMBUSTIBLE,
-        "transmission": TRANSMISION,  
+        "makerModelGrade": "",       # all models
+        "fuels": FUEL_TYPE,
+        "transmission": TRANSMISSION,  
         "yearsFrom": MIN_YEAR,
         "yearsTo": 2026,
         "mileageFrom": 0,
         "mileageTo": 300000,
         "priceFrom": 0,
-        "priceTo": PRECIO_MAXIMO,
+        "priceTo": MAX_PRICE,
         "isInspected": "false",
         "isPromotion": "false",
         "isAutobellStock": "false",
@@ -48,18 +52,18 @@ def construir_parametros(pagina: int) -> dict:
         "searchKeyword": "",
         "searchType": "",
         "orderBy": "recommend",
-        "page": pagina,
-        "size": TAMANO_PAGINA,
-        "countryCode": PAIS_ENVIO,
+        "page": page,
+        "size": PAGE_SIZE,
+        "countryCode": DESTINATION_COUNTRY,
         "isSellerLink": "false",
     }
 
 
-def obtener_conteo_esperado() -> int:
+def obtain_expected_count() -> int:
     """
-    Consulta el endpoint de conteo (el mismo que usa la web para mostrar
-    "X Units in Total") para saber cuántos autos esperar en total.
-    Sirve como validación de seguridad contra la paginación.
+    Query the count endpoint (the same one the website uses to display
+    "X Units in Total") to determine the total number of cars to expect.
+    This serves as a security check against pagination.
     """
     params = {
         "mileageFrom": 0,
@@ -67,131 +71,133 @@ def obtener_conteo_esperado() -> int:
         "yearsFrom": MIN_YEAR,
         "yearsTo": 2026,
         "priceFrom": 0,
-        "priceTo": PRECIO_MAXIMO,
-        "fuels": COMBUSTIBLE,
-        "transmission": TRANSMISION,  # confirmado: "transmission" (singular)
-        "countryCode": PAIS_ENVIO,
+        "priceTo": MAX_PRICE,
+        "fuels": FUEL_TYPE,
+        "transmission": TRANSMISSION, 
+        "countryCode": DESTINATION_COUNTRY,
     }
-    respuesta = requests.get(URL_CONTEO, params=params, headers=HEADERS, timeout=15)
-    respuesta.raise_for_status()
-    cuerpo = respuesta.json()
+    response = requests.get(URL_COUNT, params=params, headers=HEADERS, timeout=15)
+    response.raise_for_status()
+    body = response.json()
 
-    if not cuerpo.get("success", False):
-        raise RuntimeError(f"La API de conteo respondió sin éxito: {cuerpo}")
+    if not body.get("success", False):
+        raise RuntimeError(f"La API de conteo respondió sin éxito: {body}")
 
-    dato = cuerpo.get("data")
+    data = body.get("data")
 
-    if isinstance(dato, list):
-        return dato[0]
+    if isinstance(data, list):
+        return data[0]
 
-    return dato
-
-
-def obtener_autos_pagina(pagina: int) -> list:
-    """Pide una página de resultados a la API y devuelve la lista de autos."""
-    params = construir_parametros(pagina)
-    respuesta = requests.get(URL_BASE, params=params, headers=HEADERS, timeout=15)
-    respuesta.raise_for_status()
-    cuerpo = respuesta.json()
-
-    if not cuerpo.get("success", False):
-        raise RuntimeError(f"La API respondió sin éxito: {cuerpo}")
-
-    return cuerpo.get("data", [])
+    return data
 
 
-def simplificar_auto(auto_crudo: dict) -> dict:
-    """Extrae solo los campos que interesan de cada auto."""
+def obtain_car_pages(page: int) -> list:
+    """
+    Requests a page of results from the API and returns the list of cars.
+    """
+    params = build_params(page)
+    response = requests.get(URL_BASE, params=params, headers=HEADERS, timeout=15)
+    response.raise_for_status()
+    body = response.json()
+
+    if not body.get("success", False):
+        raise RuntimeError(f"La API respondió sin éxito: {body}")
+
+    return body.get("data", [])
+
+
+def obtain_relevat_data(raw_car_data: dict) -> dict:
+    """
+    Extracts only relevant data 
+    """
     return {
-        "carKey": auto_crudo.get("carKey"),
-        "marca": auto_crudo.get("makerName"),
-        "modelo": auto_crudo.get("modelName"),
-        "detalle_modelo": auto_crudo.get("modelDetailName"),
-        "anio": auto_crudo.get("year"),
-        "kilometraje": auto_crudo.get("mileage"),
-        "precio_usd": auto_crudo.get("salePrice"),
-        "combustible": auto_crudo.get("fuelTypeName") or auto_crudo.get("carFuelName"),
-        "transmision": auto_crudo.get("gearBoxName") or auto_crudo.get("transmissionName"),
-        "link": f"https://www.autobellglobal.com/usedcar/info/{auto_crudo.get('carKey')}",
+        "carKey": raw_car_data.get("carKey"),
+        "brand": raw_car_data.get("makerName"),
+        "model": raw_car_data.get("modelName"),
+        "detail_model_name": raw_car_data.get("modelDetailName"),
+        "year": raw_car_data.get("year"),
+        "mileage": raw_car_data.get("mileage"),
+        "price_usd": raw_car_data.get("salePrice"),
+        "fuel": raw_car_data.get("fuelTypeName") or raw_car_data.get("carFuelName"),
+        "transmission": raw_car_data.get("gearBoxName") or raw_car_data.get("transmissionName"),
+        "link": f"https://www.autobellglobal.com/usedcar/info/{raw_car_data.get('carKey')}",
     }
 
 
-def obtener_todos_los_autos() -> list:
+def obtain_all_cars() -> list:
     """
-    Recorre todas las páginas de resultados hasta que la API deje de
-    devolver autos, y regresa la lista completa ya simplificada.
+    Iterates through all result pages until the API stops
+    returning cars, and returns the complete, simplified list.
 
-    Incluye dos validaciones de seguridad para detectar si la API se
-    comporta de forma inesperada (por ejemplo, repitiendo resultados):
-      1. Se detiene si el total acumulado supera el conteo esperado.
-      2. Se detiene si aparece un carKey ya visto (duplicado).
+    Includes two safety checks to detect unexpected API
+    behavior (e.g., repeating results):
+      1. Stops if the cumulative total exceeds the expected count.
+      2. Stops if a previously seen carKey (duplicate) appears.
     """
-    conteo_esperado = obtener_conteo_esperado()
-    print(f"La API reporta un total esperado de {conteo_esperado} autos.\n")
+    expected_count = obtain_expected_count()
+    print(f"La API reporta un total esperado de {expected_count} autos.\n")
 
-    todos_los_autos = []
-    claves_vistas = set()
-    pagina = 1
+    all_cars = []
+    checked_keys = set()
+    pages = 1
 
     while True:
-        autos_crudos = obtener_autos_pagina(pagina)
+        raw_cars = obtain_car_pages(pages)
 
-        if not autos_crudos:
-            break  # ya no hay más resultados
+        if not raw_cars:
+            break  # no more results
 
-        for auto_crudo in autos_crudos:
-            clave = auto_crudo.get("carKey")
+        for raw_car_data in raw_cars:
+            key = raw_car_data.get("carKey")
 
-            if clave in claves_vistas:
+            if key in checked_keys:
                 raise RuntimeError(
-                    f"Se encontró un carKey duplicado ({clave}) en la página {pagina}. "
+                    f"Se encontró un carKey duplicado ({key}) en la página {pages}. "
                     "Esto sugiere un problema con la paginación (posiblemente el tamaño "
                     "de página no es soportado por la API). Deteniendo por seguridad."
                 )
 
-            claves_vistas.add(clave)
-            auto_simplificado = simplificar_auto(auto_crudo)
+            checked_keys.add(key)
+            filtered_car = obtain_relevat_data(raw_car_data)
 
-            # Doble verificación: A veces la transmisión no coincide 
-            # transmisión automática, confirmamos con el dato real del auto,
-            # por si el parámetro de la URL no fuera el correcto.
-            if auto_simplificado["transmision"] != "Automatic":
+            # Double verification: Transmission info is not always true 
+            if filtered_car["transmission"] != "Automatic":
                 print(
-                    f"Aviso!!!: {clave} vino con transmisión "
-                    f"'{auto_simplificado['transmision']}' en vez de 'Automatic'. "
+                    f"Aviso!!!: {key} vino con transmisión "
+                    f"'{filtered_car['transmission']}' en vez de 'Automatic'. "
                     "El filtro de transmisión en la URL podría no estar funcionando "
-                    "como se espera. Se omite este auto de los resultados."
+                    "como se espera. Se omite este car de los resultados."
                 )
                 continue
 
-            todos_los_autos.append(auto_simplificado)
+            all_cars.append(filtered_car)
 
-        print(f"Página {pagina}: {len(autos_crudos)} autos obtenidos "
-              f"(total acumulado: {len(todos_los_autos)} / esperado: {conteo_esperado})")
+        print(f"Página {pages}: {len(raw_cars)} autos obtenidos "
+              f"(total acumulado: {len(all_cars)} / esperado: {expected_count})")
 
-        if len(todos_los_autos) > conteo_esperado:
+        if len(all_cars) > expected_count:
             raise RuntimeError(
-                f"El total acumulado ({len(todos_los_autos)}) superó el conteo "
-                f"esperado por la API ({conteo_esperado}). Deteniendo por seguridad: "
+                f"El total acumulado ({len(all_cars)}) superó el conteo "
+                f"esperado por la API ({expected_count}). Deteniendo por seguridad: "
                 "algo no está funcionando como se espera."
             )
 
-        pagina += 1
-        time.sleep(1)  # Pausa entre peticiones
+        pages += 1
+        time.sleep(1)  # Pause between requests
 
-    return todos_los_autos
+    return all_cars
 
 
 if __name__ == "__main__":
-    print(f"Buscando autos de gasolina con precio <= ${PRECIO_MAXIMO} USD...\n")
+    print(f"Buscando autos de gasolina con precio <= ${MAX_PRICE} USD...\n")
 
-    autos = obtener_todos_los_autos()
+    cars = obtain_all_cars()
 
-    print(f"\nTotal de autos encontrados: {len(autos)}\n")
+    print(f"\nTotal de autos encontrados: {len(cars)}\n")
 
-    for auto in autos:
+    for car in cars:
         print(
-            f"{auto['marca']} {auto['modelo']} {auto['detalle_modelo'] or ''} "
-            f"({auto['anio']}) - {auto['kilometraje']} km - "
-            f"${auto['precio_usd']} - {auto['link']}"
+            f"{car['brand']} {car['model']} {car['detail_model_name'] or ''} "
+            f"({car['year']}) - {car['mileage']} km - "
+            f"${car['price_usd']} - {car['link']}"
         )
