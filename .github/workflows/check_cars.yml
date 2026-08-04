@@ -1,5 +1,8 @@
 name: Check for new car listings
 
+permissions:
+  contents: write
+
 on:
   schedule:
     # Corre 2 veces al día. Los horarios están en UTC.
