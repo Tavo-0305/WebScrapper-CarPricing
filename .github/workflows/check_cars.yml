@@ -1,0 +1,41 @@
+name: Check for new car listings
+
+on:
+  schedule:
+    # Corre 2 veces al día. Los horarios están en UTC.
+    # Costa Rica es UTC-6, así que:
+    # 13:00 UTC = 7:00 AM Costa Rica
+    # 01:00 UTC = 7:00 PM Costa Rica
+    - cron: "0 13 * * *"
+    - cron: "0 1 * * *"
+  workflow_dispatch:  # permite correrlo manualmente desde GitHub también
+
+jobs:
+  check-cars:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run car filter script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python car_filter.py
+
+      - name: Commit updated history file
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add seen_cars.json
+          git diff --staged --quiet || git commit -m "Update seen cars history [skip ci]"
+          git push
